@@ -43,3 +43,4 @@
 canvas{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 .builder-q .q-num{width:64px;margin:0;flex:none}.order-toggle{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+.review-info .reveal-key{padding:3px 10px;font-size:13px;font-weight:600;border:1px solid #1b7256;color:#1b7256;background:#fff;border-radius:4px;vertical-align:middle}.review-info .reveal-key:hover{background:#e3f3ea}
