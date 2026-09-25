@@ -1,0 +1,42 @@
+name: Deploy SKCT app to GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # One-time (or bulk) import: src.zip.partNN uploaded through the web UI are unpacked
+      # into the repository as ordinary files and the parts are removed.
+      - name: Unpack uploaded source bundle
+        run: |
+          if ls src.zip.part* >/dev/null 2>&1; then
+            cat src.zip.part* > /tmp/src.zip
+            unzip -o -q /tmp/src.zip -d .
+            git rm -q --ignore-unmatch src.zip.part* site.zip.part*
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -q -m "Unpack uploaded source bundle"
+            git push
+          fi
+      - name: Build site (dist + offline cache list)
+        run: python3 tools/build_pages.py --site _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
