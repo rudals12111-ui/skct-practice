@@ -1,0 +1,4 @@
+let dbPromise;
+function db(){return dbPromise??=new Promise((resolve,reject)=>{const request=indexedDB.open('skct-local-practice',1);request.onupgradeneeded=()=>request.result.createObjectStore('records');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});}
+export async function readRecord(key){const d=await db();return new Promise((resolve,reject)=>{const req=d.transaction('records').objectStore('records').get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+export async function writeRecord(key,value){const d=await db();return new Promise((resolve,reject)=>{const tx=d.transaction('records','readwrite');tx.objectStore('records').put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('저장 취소'));});}

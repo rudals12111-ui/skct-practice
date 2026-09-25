@@ -1,0 +1,7 @@
+node_modules/
+tests/fixtures/
+tests/.ocr-cache/
+dist/_diag/
+build/
+__pycache__/
+_site/
