@@ -12,3 +12,21 @@ test('scan pages produce no false text proposals; crop direction and grid order 
 test('project importer rejects executable assets and invalid sections and rewrites duplicate IDs',()=>{const base={format:'skct-local-v1',name:'Test',questions:[{id:'x',section:'language',parts:[{src:'data:image/png;base64,AAAA'}]}]};assert.equal(validateProject(base).questions.length,1);assert.throws(()=>validateProject({...base,questions:[{...base.questions[0],parts:[{src:'https://example.com/a.png'}]}]}));assert.throws(()=>validateProject({...base,questions:[{...base.questions[0],section:'unknown'}]}));const copy=validateProject({...base,questions:[base.questions[0],base.questions[0]]});assert.notEqual(copy.questions[0].id,copy.questions[1].id);assert(csvCell('=HYPERLINK(1)').startsWith('"\''));});
 test('real-exam spec and per-section limit trim to the first N questions of each section',async()=>{const {planFor,EXAM_SPEC,DEFAULT_SETTINGS}=await import('../dist/core.js');assert.deepEqual(EXAM_SPEC,{sections:5,questionsPerSection:20,minutes:15});const qs=Array.from({length:25},(_,i)=>({id:'q'+i,section:i<22?'language':'math'}));const all=planFor({questions:qs},DEFAULT_SETTINGS);assert.equal(all[0].questions.length,22);const limited=planFor({questions:qs},{...DEFAULT_SETTINGS,limitPerSection:20});assert.equal(limited[0].questions.length,20);assert.equal(limited[0].questions[19].id,'q19');assert.equal(limited[1].questions.length,3);});
 test('imported projects keep recognised question numbers and drop invalid ones',()=>{const base={format:'skct-local-v1',name:'T',questions:[{id:'a',section:'math',number:7,parts:[{src:'data:image/png;base64,AAAA'}]},{id:'b',section:'math',number:'x',parts:[{src:'data:image/png;base64,AAAA'}]}]};const p=validateProject(base);assert.equal(p.questions[0].number,7);assert.equal(p.questions[1].number,null);});
+
+test('manual section/number edits put the list back in exam order', async () => {
+  const {orderQuestions, parseQuestionLabel, isAutoLabel, questionLabel} = await import('../dist/core.js');
+  const q = (id, section, number) => ({id, section, number});
+  // OCR put 수열추리 1~3 under 언어추리; the user fixes them one by one.
+  const list = [q('L19', 'logic', 19), q('L20', 'logic', 20), q('S1', 'sequence', 1), q('S3', 'sequence', 3), q('S2', 'sequence', 2), q('M5', 'math', 5), q('m', 'math', null), q('M6', 'math', 6)];
+  assert.deepEqual(orderQuestions(list).map(x => x.id), ['M5', 'm', 'M6', 'L19', 'L20', 'S1', 'S2', 'S3']);
+  // Two mock exams in one list are not interleaved.
+  const two = [q('a1', 'language', 1), q('a2', 'language', 2), q('b1', 'data', 1), q('c1', 'language', 1), q('c2', 'language', 2), q('d1', 'data', 1)];
+  assert.deepEqual(orderQuestions(two).map(x => x.id), ['a1', 'a2', 'b1', 'c1', 'c2', 'd1']);
+  assert.deepEqual(parseQuestionLabel('수열추리 7'), {section: 'sequence', number: 7});
+  assert.deepEqual(parseQuestionLabel('12번'), {number: 12});
+  assert.deepEqual(parseQuestionLabel('언어 이해 3번 (지문)'), {section: 'language', number: 3});
+  assert.deepEqual(parseQuestionLabel('어려운 문제'), {});
+  assert.equal(isAutoLabel(questionLabel('logic', 4)), true);
+  assert.equal(isAutoLabel('문항 12'), true);
+  assert.equal(isAutoLabel('도형 규칙 까다로움'), false);
+});

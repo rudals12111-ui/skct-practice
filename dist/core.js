@@ -89,3 +89,35 @@ export function applyAnswerKey(questions,keys){
  }
  return report;
 }
+
+/** Default list label for a question. */
+export function questionLabel(section,number,index=0){const name=DEFAULT_SECTIONS.find(s=>s.id===section)?.name||section||'문항';return number?`${name} ${number}번`:`문항 ${index+1}`;}
+/** True when the label is one the app generated (so it may be rewritten when the section or number changes). */
+export function isAutoLabel(label){return !label||/^문항 \d+$/.test(label)||DEFAULT_SECTIONS.some(s=>new RegExp(`^${s.name} \\d+번$`).test(label));}
+/** Read a section name and/or question number typed into a label ("수열추리 7", "7번", "언어이해 12번"). */
+export function parseQuestionLabel(label){
+ const text=String(label||'').replace(/\s+/g,' ').trim();const out={};
+ const hit=DEFAULT_SECTIONS.find(s=>text.replace(/\s/g,'').includes(s.name));if(hit)out.section=hit.id;
+ const m=text.match(/(\d{1,3})\s*번?\s*$/)||text.match(/(\d{1,3})\s*번/);
+ if(m){const n=Number(m[1]);if(n>=1&&n<=300)out.number=n;}
+ return out;
+}
+/**
+ * Order questions by exam set, section order and question number.
+ * - A second copy of the same section+number (a second mock exam in the same list) opens a new set, so
+ *   two exams are not interleaved.
+ * - Questions without a number stay right after the numbered question they followed in the same section.
+ * Returns a new array; the input is not modified.
+ */
+export function orderQuestions(questions,sectionOrder=DEFAULT_SECTIONS.map(s=>s.id)){
+ const rank=id=>{const i=sectionOrder.indexOf(id);return i<0?sectionOrder.length:i;};
+ const seen={},lastSet={},lastNum={};
+ const keyed=questions.map((q,i)=>{
+  const s=q.section;let set,num;
+  if(Number.isInteger(q.number)&&q.number>0){const k=s+'#'+q.number;set=seen[k]=(seen[k]??-1)+1;num=q.number;lastSet[s]=set;lastNum[s]=num;}
+  else{set=lastSet[s]??0;num=(lastNum[s]??0)+0.5;}
+  return {q,i,set,sec:rank(s),num};
+ });
+ keyed.sort((a,b)=>a.set-b.set||a.sec-b.sec||a.num-b.num||a.i-b.i);
+ return keyed.map(k=>k.q);
+}
