@@ -162,3 +162,9 @@ test('filled-box OCR lines are mapped back from the padded, enlarged crop', asyn
   assert.equal(line.furniture, true);
   assert.equal(detectSection([line], 1942), 'sequence');
 });
+
+test('"11." misread as "il:" still parses as a question number', () => {
+  assert.equal(parseNumberToken('il:'), 11);
+  assert.equal(parseNumberToken('1!.'), 11);
+  assert.equal(parseNumberToken('il'), null, 'a bare word without the period is not a label');
+});

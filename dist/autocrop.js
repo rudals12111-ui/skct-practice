@@ -99,6 +99,19 @@ function colProfile(mask, x0, x1, y0, y1) {
   return { x0, out };
 }
 
+/**
+ * Is there a line of text-like ink right of a label? Used when OCR dropped the stem line entirely
+ * (a bold stem next to "11." on a busy page): several separate glyphs across a good stretch of the row.
+ */
+function inkTextBeside(mask, x1, y0, y1) {
+  const W = mask.width;
+  const cp = colProfile(mask, x1 + W * 0.012, Math.min(W, x1 + W * 0.36), y0, y1);
+  if (!cp.out.length) return false;
+  let inked = 0, runs = 0, prev = false;
+  for (const v of cp.out) { const on = v > 0; if (on) inked++; if (on && !prev) runs++; prev = on; }
+  return inked / cp.out.length > 0.25 && runs >= 8;
+}
+
 /** Normalise tesseract.js block output (or a flat list of lines) to [{text,bbox,words}]. */
 export function flattenOcr(data) {
   if (Array.isArray(data?.lines) && data.lines.length && data.lines[0].bbox) return data.lines;
@@ -125,7 +138,7 @@ export function mapBlockLines(lines, b) {
 
 /** Parse a question-number token. Returns the number or null. */
 export function parseNumberToken(text, { loose = false } = {}) {
-  const t = String(text || '').trim().replace(/[，,．。·:]/g, '.').replace(/[Oo]/g, '0').replace(/[Il|]/g, '1');
+  const t = String(text || '').trim().replace(/[，,．。·:]/g, '.').replace(/[Oo]/g, '0').replace(/[Iil|!]/g, '1');
   let m = t.match(/^(?:Q|문제|문항)?\s*0*(\d{1,3})\s*\.$/i) || t.match(/^(?:Q|문제|문항)\s*0*(\d{1,3})\.?$/i) || t.match(/^0(\d{1,2})$/) || t.match(/^(\d{1,3})번\.?$/);
   if (!m && loose) m = t.match(/^0*(\d{1,3})\.?$/);
   if (!m) return null;
@@ -219,7 +232,7 @@ export async function planPage(ocr, mask, options = {}) {
     // A question number is followed by stem text, not by more numbers ("2, 4, 8, 16").
     const rest = line.text.slice(line.text.indexOf(first.text) + first.text.length);
     const besideStem = bodyLines.some(o => o !== line && o.bbox.x0 > bbox.x1 && o.bbox.x0 < bbox.x1 + W * 0.2 && o.bbox.y0 < bbox.y1 && o.bbox.y1 > bbox.y0 && /[가-힣A-Za-z]{2}/.test(o.text));
-    if (!/[가-힣A-Za-z]{2}/.test(rest) && !besideStem) continue;
+    if (!/[가-힣A-Za-z]{2}/.test(rest) && !besideStem && !inkTextBeside(mask, bbox.x1, bbox.y0, bbox.y1)) continue;
     candidates.push({ n, bbox: { ...bbox }, line, source: 'ocr' });
   }
 
@@ -309,8 +322,9 @@ export async function planPage(ocr, mask, options = {}) {
       try { text = verify ? await verify(rect) : null; } catch { text = null; }
       // Whatever the digits say, a real label has a stem beside it.
       const stemBeside = bodyLines.some(l => l.bbox.y0 < ry1 + col.numH * 0.5 && l.bbox.y1 > ry0 - col.numH * 0.5 && l.bbox.x0 > x1 && l.bbox.x0 < x1 + W * 0.2 && /[가-힣A-Za-z]{2}/.test(l.text));
-      if (!stemBeside) continue;
       let n = text ? parseNumberToken(text, { loose: true }) : null;
+      // OCR sometimes loses the whole stem line; a readable number followed by a row of glyphs still counts.
+      if (!stemBeside && !(n !== null && inkTextBeside(mask, x1, ry0, ry1))) continue;
       // Unreadable blob: accept only when a question stem follows on the right.
       if (n === null) {
         const right = bodyLines.filter(l => l.bbox.y0 < ry1 + col.numH * 3.2 && l.bbox.y1 > ry0 - col.numH * 0.5 && l.bbox.x0 > x1 && l.bbox.x0 < x1 + W * 0.25);
