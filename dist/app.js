@@ -139,5 +139,20 @@ try{document.modelContext?.registerTool({name:'read_practice_status',title:'시�
 
 // Offline install (PWA): only on the hosted HTTPS copy. The local START.cmd server is left
 // uncached so file updates show up immediately.
-if('serviceWorker' in navigator&&location.protocol==='https:'){navigator.serviceWorker.register('sw.js').then(reg=>{reg.addEventListener('updatefound',()=>{const w=reg.installing;w?.addEventListener('statechange',()=>{if(w.state==='installed'&&navigator.serviceWorker.controller)toast('새 버전을 받았습니다. 앱을 다시 열면 적용됩니다.');});});}).catch(()=>{});}
+// Offline app updates. A home-screen app on iPad is often resumed rather than reloaded, so check for a new
+// version whenever the app comes back to the foreground and switch to it right away unless that would
+// interrupt something (an exam in progress or an open dialog such as the PDF editor).
+if('serviceWorker' in navigator&&location.protocol==='https:'){
+ const hadController=!!navigator.serviceWorker.controller;let reloading=false,pendingReload=false;
+ const busyNow=()=>['running','break','paused'].includes(session.status)||!!document.querySelector('dialog[open]');
+ const applyUpdate=()=>{if(reloading)return;if(busyNow()){if(!pendingReload)toast('새 버전을 받았습니다. 시험이나 편집 창을 닫으면 적용됩니다.');pendingReload=true;return;}reloading=true;location.reload();};
+ navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadController)applyUpdate();});
+ navigator.serviceWorker.register('sw.js').then(reg=>{
+  const check=()=>reg.update().catch(()=>{});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')check();});
+  setInterval(check,30*60*1000);
+  // An update that arrived during an exam or editing is applied once that is over.
+  setInterval(()=>{if(pendingReload&&!busyNow())applyUpdate();},5000);
+ }).catch(()=>{});
+}
 $('reviewInfo').addEventListener('click',e=>{const q=qNow();if(!q)return;if(e.target.closest('#revealKeyBtn')){revealedKeys.add(q.id);render();$('hideKeyBtn')?.focus();}else if(e.target.closest('#hideKeyBtn')){revealedKeys.delete(q.id);render();$('revealKeyBtn')?.focus();}});
