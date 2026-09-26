@@ -168,3 +168,14 @@ test('"11." misread as "il:" still parses as a question number', () => {
   assert.equal(parseNumberToken('1!.'), 11);
   assert.equal(parseNumberToken('il'), null, 'a bare word without the period is not a label');
 });
+
+test('choices running down near the page number are not taken for the footer', async () => {
+  const {findFooterTop} = await import('../dist/autocrop.js');
+  const L = (y0, y1, text = 'x') => ({text, bbox: {x0: 300, y0, x1: 900, y1}});
+  const H = 1942, lineH = 25;
+  // Page 109 layout: ①②③ row, ④⑤ row (inside the bottom 12%), then the running footer after a gap.
+  const body = [L(1594, 1618), L(1668, 1705), L(1715, 1738), L(1807, 1834, 'part 02 기출복원 모의고사 107')];
+  assert.equal(findFooterTop(body, H, lineH), 1807 - lineH * 0.4);
+  // Text all the way down with no separated footer: nothing is cut.
+  assert.equal(findFooterTop([L(1700, 1725), L(1735, 1760), L(1770, 1795)], H, lineH), H * 0.975);
+});

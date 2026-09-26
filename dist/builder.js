@@ -199,7 +199,20 @@ export function initBuilder({toast,ask,download,getProject,getSettings,onApply,o
   const picked=suggestions.filter(s=>!s.excluded);if(!picked.length||busy)return;
   if(draft.questions.length+picked.length>500)return toast('최대 500문항까지 추가할 수 있습니다.');
   checkpoint();
-  if(lastPlan){const added=addPlan(lastPlan,picked);status(`${added.length}문항을 추가했습니다. 다음 쪽으로 이동해 계속 인식하세요.`);}
+  if(lastPlan){
+   const before=new Set(draft.questions.map(q=>q.id));
+   const added=addPlan(lastPlan,picked);
+   // Re-scanning a page already in the list: replace those questions instead of adding a second copy
+   // (a second copy would be treated as another exam set and sorted after the last question).
+   const pairs=added.map(q=>({q,old:q.number&&draft.questions.find(o=>before.has(o.id)&&o.section===q.section&&o.number===q.number)})).filter(x=>x.old);
+   let replaced=0;
+   if(pairs.length&&await ask(`이미 있는 ${pairs.map(x=>x.q.number+'번').join(', ')}을 새로 인식한 이미지로 바꿀까요?`,`같은 영역(${sectionName(pairs[0].q.section)})에 같은 번호가 이미 있습니다. ‘바꾸기’는 기존 문항의 이미지만 교체하고 정답은 유지합니다. ‘취소’는 다른 회차 문항으로 보고 따로 추가합니다.`,'바꾸기')){
+    for(const {q,old} of pairs){old.parts=q.parts;draft.questions.splice(draft.questions.indexOf(q),1);if(selectedId===q.id)selectedId=old.id;}
+    replaced=pairs.length;
+   }
+   reorder(selectedId);
+   status(`${added.length-replaced?`${added.length-replaced}문항을 추가`:''}${added.length-replaced&&replaced?', ':''}${replaced?`${replaced}문항을 교체`:''}했습니다. 다음 쪽으로 이동해 계속 인식하세요.`);
+  }
   else{for(const r of picked)pushPart(cropPart(r,r.masks||[]),{section:r.section||$('cropSection').value});status(`${picked.length}문항을 추가했습니다.`);}
   clearSuggestions();drawOverlays();renderList();saveDraft();
  }

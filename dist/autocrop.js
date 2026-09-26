@@ -191,6 +191,19 @@ function clusterByX(items, tol) {
   return clusters;
 }
 
+/** Top of the running footer (page number, publisher line), or H*0.975 when there is none. */
+export function findFooterTop(bodyLines, H, lineH) {
+  const band = bodyLines.filter(l => (l.bbox.y0 + l.bbox.y1) / 2 > H * 0.88).sort((a, b) => a.bbox.y0 - b.bbox.y0);
+  for (const l of band) {
+    const rowTop = l.bbox.y0;
+    // Nearest text above this row (anything that ends above its top and is not on the same row).
+    const above = bodyLines.filter(o => o.bbox.y1 <= rowTop + lineH * 0.3 && o.bbox.y0 < rowTop - lineH * 0.5);
+    const gap = above.length ? rowTop - Math.max(...above.map(o => o.bbox.y1)) : 0;
+    if (gap >= lineH * 1.2) return rowTop - lineH * 0.4;
+  }
+  return H * 0.975;
+}
+
 /**
  * Plan crops for one page.
  * @param {{width:number,height:number,lines:Array}} ocr   OCR lines in page pixels
@@ -209,8 +222,9 @@ export async function planPage(ocr, mask, options = {}) {
   const lineH = median(bodyLines.map(l => l.bbox.y1 - l.bbox.y0)) || H * 0.013;
 
   // Page furniture: running footer and the side index tab.
-  const footerLines = bodyLines.filter(l => (l.bbox.y0 + l.bbox.y1) / 2 > H * 0.88);
-  const footerTop = footerLines.length ? Math.min(...footerLines.map(l => l.bbox.y0)) - lineH * 0.4 : H * 0.975;
+  // The footer is the text at the bottom that stands apart from the body: choices that run down close
+  // to the page number (last row of a question near the bottom) must not be taken for the footer.
+  const footerTop = findFooterTop(bodyLines, H, lineH);
   const sideLines = lines.filter(l => l.bbox.x0 > W * 0.88 && l.bbox.x1 - l.bbox.x0 < W * 0.12);
   const sideX = sideLines.length ? Math.min(...sideLines.map(l => l.bbox.x0)) - W * 0.006 : W;
   const inBody = b => (b.y0 + b.y1) / 2 < footerTop && b.x0 < sideX;
@@ -226,6 +240,9 @@ export async function planPage(ocr, mask, options = {}) {
       const m = first.text.match(/^0*(\d{1,3})[.．,](?=[^\d\s,])/);
       if (m) { n = Number(m[1]); const frac = m[0].length / first.text.length; bbox = { ...first.bbox, x1: first.bbox.x0 + (first.bbox.x1 - first.bbox.x0) * frac }; }
     }
+    // A lone "11" (period lost in OCR) at the start of a line, if a stem follows below (checked next).
+    let loose = false;
+    if (n === null && (line.words?.length ?? 1) === 1 && /^\d{1,2}$/.test(first.text.trim())) { n = Number(first.text.trim()); loose = true; }
     if (n === null) continue;
     const h = bbox.y1 - bbox.y0;
     if (h < lineH * 0.55 || h > lineH * 2.6) continue;
@@ -233,7 +250,10 @@ export async function planPage(ocr, mask, options = {}) {
     const rest = line.text.slice(line.text.indexOf(first.text) + first.text.length);
     const besideStem = bodyLines.some(o => o !== line && o.bbox.x0 > bbox.x1 && o.bbox.x0 < bbox.x1 + W * 0.2 && o.bbox.y0 < bbox.y1 && o.bbox.y1 > bbox.y0 && /[가-힣A-Za-z]{2}/.test(o.text));
     if (!/[가-힣A-Za-z]{2}/.test(rest) && !besideStem && !inkTextBeside(mask, bbox.x1, bbox.y0, bbox.y1)) continue;
-    candidates.push({ n, bbox: { ...bbox }, line, source: 'ocr' });
+    // "12." or "01" look like labels; "8:" / "11" could also be other text, so they count for less
+    // when deciding which x is the number column.
+    const weight = /^0?\d{1,3}[.．]$|^0\d$/.test(first.text.trim()) ? 2 : 1;
+    candidates.push({ n, bbox: { ...bbox }, line, source: 'ocr', weight, loose });
   }
 
   // 1b. Nothing read as a number (typical on a page with a single question when OCR drops
@@ -269,7 +289,8 @@ export async function planPage(ocr, mask, options = {}) {
   }
 
   // 2. Choose the number column(s): numbers in a book are aligned on a common x.
-  const clusters = clusterByX(candidates, W * 0.025).sort((a, b) => b.items.length - a.items.length || a.x - b.x);
+  const score = c => c.items.reduce((t, it) => t + (it.weight || 1), 0);
+  const clusters = clusterByX(candidates, W * 0.025).sort((a, b) => score(b) - score(a) || a.x - b.x);
   let chosen = [];
   if (clusters.length) {
     // Primary column: the best-supported alignment in the left half (reading starts there).
@@ -341,11 +362,15 @@ export async function planPage(ocr, mask, options = {}) {
   for (const col of cols) {
     const labeled = col.items.filter(it => it.n != null);
     const keep = new Set(longestIncreasing(labeled));
+    // A label found in the number margin with a stem beside it is a real question even when its digits
+    // were misread ("11." read as "8"): keep it unnumbered and let the order fill in the number.
+    for (const it of col.items) if (it.n != null && !keep.has(it) && (it.source.startsWith('pixel') || it.loose)) { it.misread = it.n; it.n = null; }
     col.items = col.items.filter(it => it.n == null || keep.has(it));
   }
   // Repair numbering using reading order.
   const ordered = cols.flatMap(c => c.items.map(it => ({ it, col: c })));
   repairSequence(ordered.map(o => o.it), expectNext, warnings);
+  for (const { it } of ordered) if (it.misread != null && it.n != null) warnings.push(`${it.n}번 번호가 ${it.misread}(으)로 읽혀 앞뒤 순서로 ${it.n}번을 정했습니다. 확인하세요.`);
 
   // 5. Shared-passage markers such as [01~02] act as boundaries too.
   const markers = [];
